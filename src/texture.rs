@@ -19,6 +19,8 @@ impl Texture {
         label: &str
     ) -> Result<Self> {
 
+        // let img = image::load_from_memory(bytes)?;
+        // Self::from_image(device, queue, img.to_rgba8().as_bytes(), img.width(), img.height(), Some(label))
         unsafe {
             let begin = Instant::now();
 
@@ -61,7 +63,7 @@ impl Texture {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8Unorm,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             }
