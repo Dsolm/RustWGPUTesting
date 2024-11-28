@@ -1,8 +1,13 @@
-mod instanced_rendering;
-mod state;
-mod vertex;
-mod texture;
 mod camera;
+mod instanced_rendering;
+mod model;
+mod resources;
+mod state;
+mod texture;
+mod vertex;
+mod light;
+
+use std::time::Instant;
 
 use winit::{
     event::*,
@@ -19,6 +24,7 @@ async fn run() {
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
     let mut state = State::new(&window).await;
+    let mut last_render_time = Instant::now();
 
     event_loop
         .run(move |event, control_flow| match event {
@@ -48,7 +54,10 @@ async fn run() {
                             //     return;
                             // }
 
-                            state.update();
+                            let now = Instant::now();
+                            let dt = now - last_render_time;
+                            last_render_time = now;
+                            state.update(&dt);
                             match state.render() {
                                 Ok(_) => {}
                                 Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
@@ -68,6 +77,12 @@ async fn run() {
                         _ => {}
                     }
                 }
+            }
+            Event::DeviceEvent {
+                event: DeviceEvent::MouseMotion{ delta, },
+                .. // We're not using device_id currently
+            } => if state.mouse_pressed {
+                state.camera_controller.process_mouse(delta.0, delta.1)
             }
             _ => {}
         })
