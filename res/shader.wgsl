@@ -11,9 +11,10 @@ struct InstanceInput {
 };
 
 struct Light {
-    position: vec3<f32>,
+    direction: vec3<f32>,
     color: vec3<f32>,
 }
+
 @group(2) @binding(0)
 var<uniform> light: Light;
 
@@ -38,7 +39,7 @@ struct VertexOutput {
     @location(0) tex_coords: vec2<f32>,
     @location(1) tangent_position: vec3<f32>,
     @location(2) world_position: vec3<f32>,
-    @location(3) tangent_light_position: vec3<f32>, 
+    @location(3) tangent_light_direction: vec3<f32>, 
     @location(4) tangent_view_position: vec3<f32>, 
 };
 
@@ -78,7 +79,9 @@ fn vs_main(
     out.tex_coords = model.tex_coords;
     out.tangent_position = tangent_matrix * world_position.xyz;
     out.tangent_view_position = tangent_matrix * camera.view_pos.xyz;
-    out.tangent_light_position = tangent_matrix * light.position;
+
+    out.tangent_light_direction = tangent_matrix * light.direction;
+
     return out;
 }
 
@@ -97,12 +100,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let object_normal: vec4<f32> = textureSample(t_normal, s_normal, in.tex_coords);
     
     // We don't need (or want) much ambient light, so 0.1 is fine
-    let ambient_strength = 0.1;
+    let ambient_strength = 0.01;
     let ambient_color = light.color * ambient_strength;
 
     // Create the lighting vectors
     let tangent_normal = object_normal.xyz * 2.0 - 1.0;
-    let light_dir = normalize(in.tangent_light_position - in.tangent_position);
+    let light_dir = normalize(in.tangent_light_direction);
     let view_dir = normalize(in.tangent_view_position - in.tangent_position);
     let half_dir = normalize(view_dir + light_dir);
 
