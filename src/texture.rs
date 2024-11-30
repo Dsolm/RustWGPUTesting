@@ -2,7 +2,7 @@ use std::time::Instant;
 
 // use image::GenericImageView;
 use anyhow::*;
-use stb_image::{image::load_from_memory, stb_image::{stbi_image_free, stbi_load_from_memory}};
+use stb_image::stb_image::{stbi_image_free, stbi_load_from_memory};
 
 pub struct Texture {
     #[allow(unused)]
@@ -16,9 +16,9 @@ impl Texture {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         bytes: &[u8], 
-        label: &str
+        label: &str,
+        is_normal_map: bool
     ) -> Result<Self> {
-
         // let img = image::load_from_memory(bytes)?;
         // Self::from_image(device, queue, img.to_rgba8().as_bytes(), img.width(), img.height(), Some(label))
         unsafe {
@@ -37,7 +37,7 @@ impl Texture {
 
             let data = std::slice::from_raw_parts(buffer, (width*height*actual_channels) as usize);
             println!("stb_image::image::load_from_memory for label: {} took {}ms", label, begin.elapsed().as_millis());
-            let res = Self::from_image(device, queue, data, width as u32, height as u32, Some(label));
+            let res = Self::from_image(device, queue, data, width as u32, height as u32, Some(label), is_normal_map);
             stbi_image_free(buffer as _);
             res
         }
@@ -49,13 +49,21 @@ impl Texture {
         data: &[u8],
         width: u32,
         height: u32,
-        label: Option<&str>
+        label: Option<&str>,
+        is_normal_map: bool
     ) -> Result<Self> {
         let size = wgpu::Extent3d {
-            width: width,
-            height: height,
+            width,
+            height,
             depth_or_array_layers: 1,
         };
+
+        let format = if is_normal_map {
+            wgpu::TextureFormat::Rgba8Unorm
+        } else {
+            wgpu::TextureFormat::Rgba8UnormSrgb
+        };
+
         let texture = device.create_texture(
             &wgpu::TextureDescriptor {
                 label,
@@ -63,7 +71,7 @@ impl Texture {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                format,
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             }

@@ -4,7 +4,6 @@ mod model;
 mod resources;
 mod state;
 mod texture;
-mod vertex;
 mod light;
 
 use std::time::Instant;
