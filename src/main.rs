@@ -18,7 +18,7 @@ async fn run() {
     let window = WindowBuilder::new().build(&event_loop).unwrap();
     {
         let mut renderer = create_wgpu_renderer_winit(&window).await;
-        let _model = renderer.load_model("cube.obj").await.expect("Error while loading model");
+        // let _model = renderer.load_model("cube.obj").await.expect("Error while loading model");
         let mut last_render_time = Instant::now();
 
         event_loop

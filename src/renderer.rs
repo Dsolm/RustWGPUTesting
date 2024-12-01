@@ -8,6 +8,7 @@ pub enum RenderError {
     OutOfMemory,
 }
 
+#[allow(dead_code)]
 pub struct ModelHandle(u16); 
 
 pub trait Renderer {

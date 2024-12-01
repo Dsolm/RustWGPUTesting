@@ -1,7 +1,7 @@
 use std::{future::Future, pin::Pin, time::Duration};
 use crate::renderer::wgpu_renderer::resources::load_wgpu_model;
 
-use model::WgpuModel;
+
 use wgpu::util::DeviceExt;
 use winit::{
     event::{ElementState, KeyEvent, MouseButton, WindowEvent},
@@ -9,12 +9,10 @@ use winit::{
     window::Window,
 };
 
-mod instanced_rendering;
 mod model;
 mod texture;
 mod resources;
 
-use instanced_rendering::{Instance, InstanceRaw};
 use texture::Texture;
 use resources::load_string;
 
@@ -32,30 +30,24 @@ struct LightUniform {
     _padding2: u32,
 }
 
+mod instanced_rendering;
+
 struct WgpuRenderer<'a> {
-    surface: wgpu::Surface<'a>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     width: u32,
     height: u32,
-
+    surface: wgpu::Surface<'a>,
+    depth_texture: Texture,
     render_pipeline: wgpu::RenderPipeline,
 
     camera_controller: CameraController,
     camera: Camera,
     projection: Projection,
-
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     camera_uniform: CameraUniform,
-
-    instances: Vec<Instance>,
-    instance_buffer: wgpu::Buffer,
-
-    depth_texture: Texture,
-
-    obj_model: WgpuModel,
 
     light_uniform: LightUniform,
     light_buffer: wgpu::Buffer,
@@ -64,14 +56,12 @@ struct WgpuRenderer<'a> {
     mouse_pressed: bool, // NEW!
 
     texture_bind_group_layout: wgpu::BindGroupLayout,
-    loaded_models: Vec<WgpuModel>,
+
+    // instance_groups: Vec<InstanceGroup>,
 }
 
-use cgmath::prelude::*;
 
 use super::{ModelHandle, RenderError, Renderer};
-
-const NUM_INSTANCES_PER_ROW: u32 = 10;
 
 impl<'a> WgpuRenderer<'a> {
     // Creating some of the wgpu types requires async code
@@ -287,45 +277,10 @@ impl<'a> WgpuRenderer<'a> {
                 &render_pipeline_layout,
                 config.format,
                 Some(texture::Texture::DEPTH_FORMAT),
-                &[model::ModelVertex::desc(), InstanceRaw::desc()],
+                &[model::ModelVertex::desc(), instanced_rendering::InstanceRaw::desc()],
                 shader,
             )
         };
-
-        const SPACE_BETWEEN: f32 = 15.0;
-        let instances = (0..NUM_INSTANCES_PER_ROW)
-            .flat_map(|z| {
-                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-                    let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-
-                    let position = cgmath::Vector3 { x, y: 0.0, z };
-
-                    let rotation = if position.is_zero() {
-                        cgmath::Quaternion::from_axis_angle(
-                            cgmath::Vector3::unit_z(),
-                            cgmath::Deg(0.0),
-                        )
-                    } else {
-                        cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
-                    };
-
-                    Instance { position, rotation }
-                })
-            })
-            .collect::<Vec<_>>();
-
-        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
-        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Instance Buffer"),
-            contents: bytemuck::cast_slice(&instance_data),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
-        let obj_model =
-            resources::load_wgpu_model("cube.obj", &device, &queue, &texture_bind_group_layout)
-                .await
-                .unwrap();
 
         Self {
             surface,
@@ -343,29 +298,22 @@ impl<'a> WgpuRenderer<'a> {
             camera_controller,
             camera_uniform,
 
-            instances,
-            instance_buffer,
-
             depth_texture,
-
-            obj_model,
 
             light_uniform,
             light_buffer,
             light_bind_group,
 
-
             mouse_pressed: false,
 
+            // instance_groups: vec![instance_group],
+
             texture_bind_group_layout,
-            loaded_models: vec![],
         }
     }
-
 }
 
 impl Renderer for WgpuRenderer<'_> {
-
     fn resize(&mut self, width: u32, height: u32) {
         if width > 0 && height > 0 {
             self.projection.resize(width, height);
@@ -483,18 +431,20 @@ impl Renderer for WgpuRenderer<'_> {
                 timestamp_writes: None,
             });
 
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
             render_pass.set_bind_group(2, &self.light_bind_group, &[]);
-            use model::DrawModel;
-            render_pass.draw_model_instanced(
-                &self.obj_model,
-                0..self.instances.len() as u32,
-                &self.camera_bind_group,
-                &self.light_bind_group,
-            );
-
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            for instance_group in &self.instance_manager.instance_groups {
+                render_pass.set_vertex_buffer(1, instance_group.instance_buffer.slice(..));
+                // let model = &self.loaded_models[instance_group.model_handle.0];
+                for mesh in &instance_group.model.meshes { 
+                    let material = &instance_group.model.materials[mesh.material]; // TODO: Cache material bind-groups between draw-calls?
+                    render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                    render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    render_pass.set_bind_group(0, &material.bind_group, &[]);
+                    render_pass.draw_indexed(0..mesh.num_elements, 0, 0..instance_group.instances.len() as u32);  // TODO: Re implement instancing
+                }
+            }
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -513,8 +463,8 @@ impl Renderer for WgpuRenderer<'_> {
 
                 let model = load_wgpu_model(file_path, &self.device, &self.queue, &self.texture_bind_group_layout).await?;
 
-                self.loaded_models.push(model);
-                Ok(ModelHandle((self.loaded_models.len() - 1) as u16))
+                todo!();
+                // Ok(ModelHandle((self.loaded_models.len() - 1) as u16))
             }
         )
     }
