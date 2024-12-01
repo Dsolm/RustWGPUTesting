@@ -4,20 +4,16 @@ use std::{
 };
 use wgpu::util::DeviceExt;
 
-use crate::{model, texture};
+use super::{model, texture};
 
 pub fn load_string(file_name: &str) -> anyhow::Result<String> {
-    let path = std::path::Path::new(env!("OUT_DIR"))
-        .join("res")
+    let path = std::path::Path::new("res")
         .join(file_name);
-    let txt = std::fs::read_to_string(path)?;
-
-    Ok(txt)
+    Ok(std::fs::read_to_string(path)?)
 }
 
 pub fn load_binary(file_name: &str) -> anyhow::Result<Vec<u8>> {
-    let path = std::path::Path::new(env!("OUT_DIR"))
-        .join("res")
+    let path = std::path::Path::new("res")
         .join(file_name);
     let data = std::fs::read(path)?;
 
@@ -46,12 +42,12 @@ pub fn load_texture(
     res
 }
 
-pub async fn load_model(
+pub async fn load_wgpu_model(
     file_name: &str,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
-) -> anyhow::Result<model::Model> {
+) -> anyhow::Result<model::WgpuModel> {
     let begin = Instant::now();
 
     let obj_text = load_string(file_name)?;
@@ -63,18 +59,18 @@ pub async fn load_model(
         begin.elapsed().as_millis()
     );
 
-    let (models, obj_materials) = tobj::load_obj_buf(
+    let (models, obj_materials) = tobj::load_obj_buf_async(
         &mut obj_reader,
         &tobj::LoadOptions {
             triangulate: true,
             single_index: true,
             ..Default::default()
         },
-        |p| {
-            let mat_text = load_string(p.to_str().unwrap()).unwrap();
+        |p| async move {
+            let mat_text = load_string(&p).unwrap();
             tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(mat_text)))
         },
-    )?;
+    ).await?;
     println!(
         "Tobj call for {} took {}ms",
         file_name,
@@ -85,7 +81,7 @@ pub async fn load_model(
     for m in obj_materials? {
         let diffuse_texture = load_texture(&m.diffuse_texture, device, queue, false)?;
         let normal_texture = load_texture(&m.normal_texture, device, queue, true)?;
-        materials.push(model::Material::new(
+        materials.push(model::WgpuMaterial::new(
             device,
             &m.name,
             diffuse_texture,
@@ -228,7 +224,7 @@ pub async fn load_model(
                 usage: wgpu::BufferUsages::INDEX,
             });
 
-            model::Mesh {
+            model::WgpuMesh {
                 name: file_name.to_string(),
                 vertex_buffer,
                 index_buffer,
@@ -243,5 +239,5 @@ pub async fn load_model(
         file_name,
         begin.elapsed().as_millis()
     );
-    Ok(model::Model { meshes, materials })
+    Ok(model::WgpuModel { meshes, materials })
 }

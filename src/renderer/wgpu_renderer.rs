@@ -1,5 +1,7 @@
-use std::time::Duration;
+use std::{future::Future, pin::Pin, time::Duration};
+use crate::renderer::wgpu_renderer::resources::load_wgpu_model;
 
+use model::WgpuModel;
 use wgpu::util::DeviceExt;
 use winit::{
     event::{ElementState, KeyEvent, MouseButton, WindowEvent},
@@ -7,15 +9,19 @@ use winit::{
     window::Window,
 };
 
+mod instanced_rendering;
+mod model;
+mod texture;
+mod resources;
+
+use instanced_rendering::{Instance, InstanceRaw};
+use texture::Texture;
+use resources::load_string;
+
 use crate::{
     camera::{camera_controller::CameraController, projection::Projection, Camera, CameraUniform},
-    instanced_rendering::{Instance, InstanceRaw},
-    model::{self, Model},
-    resources::{self, load_string},
-    texture::{self, Texture},
 };
 
-// lib.rs
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct LightUniform {
@@ -23,24 +29,21 @@ struct LightUniform {
     // Due to uniforms requiring 16 byte (4 float) spacing, we need to use a padding field here
     _padding: u32,
     color: [f32; 3],
-    // Due to uniforms requiring 16 byte (4 float) spacing, we need to use a padding field here
     _padding2: u32,
 }
 
-pub struct State<'a> {
+struct WgpuRenderer<'a> {
     surface: wgpu::Surface<'a>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
-    pub size: winit::dpi::PhysicalSize<u32>,
-    // The window must be declared after the surface so
-    // it gets dropped after it as the surface contains
-    // unsafe references to the window's resources.
-    window: &'a Window,
+    width: u32,
+    height: u32,
+
     render_pipeline: wgpu::RenderPipeline,
 
+    camera_controller: CameraController,
     camera: Camera,
-    pub camera_controller: CameraController,
     projection: Projection,
 
     camera_buffer: wgpu::Buffer,
@@ -52,22 +55,27 @@ pub struct State<'a> {
 
     depth_texture: Texture,
 
-    obj_model: Model,
+    obj_model: WgpuModel,
 
     light_uniform: LightUniform,
     light_buffer: wgpu::Buffer,
     light_bind_group: wgpu::BindGroup,
+    
+    mouse_pressed: bool, // NEW!
 
-    pub mouse_pressed: bool, // NEW!
+    texture_bind_group_layout: wgpu::BindGroupLayout,
+    loaded_models: Vec<WgpuModel>,
 }
 
 use cgmath::prelude::*;
 
+use super::{ModelHandle, RenderError, Renderer};
+
 const NUM_INSTANCES_PER_ROW: u32 = 10;
 
-impl<'a> State<'a> {
+impl<'a> WgpuRenderer<'a> {
     // Creating some of the wgpu types requires async code
-    pub async fn new(window: &'a Window) -> State<'a> {
+    async fn new(window: &'a Window) -> WgpuRenderer<'a> {
         let size = window.inner_size();
 
         // The instance is a handle to our GPU
@@ -284,8 +292,6 @@ impl<'a> State<'a> {
             )
         };
 
-
-
         const SPACE_BETWEEN: f32 = 15.0;
         let instances = (0..NUM_INSTANCES_PER_ROW)
             .flat_map(|z| {
@@ -317,17 +323,17 @@ impl<'a> State<'a> {
         });
 
         let obj_model =
-            resources::load_model("backpack.obj", &device, &queue, &texture_bind_group_layout)
+            resources::load_wgpu_model("cube.obj", &device, &queue, &texture_bind_group_layout)
                 .await
                 .unwrap();
 
         Self {
-            window,
             surface,
             device,
             queue,
             config,
-            size,
+            width: size.width,
+            height: size.height,
             render_pipeline,
 
             camera,
@@ -348,35 +354,40 @@ impl<'a> State<'a> {
             light_buffer,
             light_bind_group,
 
+
             mouse_pressed: false,
+
+            texture_bind_group_layout,
+            loaded_models: vec![],
         }
     }
 
-    pub fn window(&self) -> &Window {
-        self.window
-    }
+}
 
-    pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
-        if new_size.width > 0 && new_size.height > 0 {
-            self.projection.resize(new_size.width, new_size.height);
-            self.size = new_size;
-            self.config.width = new_size.width;
-            self.config.height = new_size.height;
+impl Renderer for WgpuRenderer<'_> {
+
+    fn resize(&mut self, width: u32, height: u32) {
+        if width > 0 && height > 0 {
+            self.projection.resize(width, height);
+            self.width = width;
+            self.height = height;
+            self.config.width = width;
+            self.config.height = height;
             self.surface.configure(&self.device, &self.config);
             self.depth_texture =
                 texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
         }
     }
 
-    pub fn input(&mut self, event: &WindowEvent) -> bool {
+    fn input(&mut self, event: &WindowEvent) -> bool {
         match event {
             WindowEvent::KeyboardInput {
                 event:
-                    KeyEvent {
-                        physical_key: PhysicalKey::Code(key),
-                        state,
-                        ..
-                    },
+                KeyEvent {
+                    physical_key: PhysicalKey::Code(key),
+                    state,
+                    ..
+                },
                 ..
             } => self.camera_controller.process_keyboard(*key, *state),
             WindowEvent::MouseWheel { delta, .. } => {
@@ -395,7 +406,7 @@ impl<'a> State<'a> {
         }
     }
 
-    pub fn update(&mut self, dt: &Duration) {
+    fn update(&mut self, dt: &Duration) {
         self.camera_controller.update_camera(&mut self.camera, dt);
         self.camera_uniform
             .update_view_proj(&self.camera, &self.projection);
@@ -421,8 +432,20 @@ impl<'a> State<'a> {
         );
     }
 
-    pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
-        let output = self.surface.get_current_texture()?;
+    fn render(&mut self) -> Result<(), RenderError> {
+        let output = match self.surface.get_current_texture() {
+            Ok(v) => v,
+            Err(wgpu::SurfaceError::Outdated | wgpu::SurfaceError::Lost) => {
+                self.resize(self.width, self.height);
+                return Ok(());
+            }
+            Err(wgpu::SurfaceError::Timeout) => {
+                return Err(RenderError::Timeout)
+            }
+            Err(wgpu::SurfaceError::OutOfMemory) => {
+                return Err(RenderError::OutOfMemory)
+            }
+        };
         let view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -478,6 +501,26 @@ impl<'a> State<'a> {
         output.present();
 
         Ok(())
+    }
+
+    fn mouse_pressed(&self) -> bool {
+        self.mouse_pressed
+    }
+
+    fn load_model<'a>(&'a mut self, file_path: &'a str) -> Pin<Box<dyn Future<Output = anyhow::Result<ModelHandle>> + Send + '_>> {
+        Box::pin(
+            async {
+
+                let model = load_wgpu_model(file_path, &self.device, &self.queue, &self.texture_bind_group_layout).await?;
+
+                self.loaded_models.push(model);
+                Ok(ModelHandle((self.loaded_models.len() - 1) as u16))
+            }
+        )
+    }
+
+    fn camera_controller(&mut self) -> &mut CameraController {
+        &mut self.camera_controller
     }
 }
 
@@ -540,4 +583,8 @@ fn create_render_pipeline(
         multiview: None,
         cache: None,
     })
+}
+
+pub async fn create_wgpu_renderer_winit<'a>(window: &'a Window) -> Box<dyn Renderer + 'a> {
+    Box::new(WgpuRenderer::new(window).await)
 }
