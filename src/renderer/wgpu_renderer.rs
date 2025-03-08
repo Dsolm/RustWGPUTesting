@@ -319,7 +319,7 @@ impl<'a> WgpuRenderer<'a> {
 
             loaded_models: vec![],
         };
-        let model_handle = res.load_model("cube.obj", 100).await.unwrap();
+        let model_handle = res.load_model("cube.obj", 102).await.unwrap();
         const NUM_INSTANCES_PER_ROW: u32 = 10;
         const SPACE_BETWEEN: f32 = 3.0;
         let instances = (0..NUM_INSTANCES_PER_ROW)
@@ -344,9 +344,11 @@ impl<'a> WgpuRenderer<'a> {
             })
             .collect::<Vec<_>>();
 
+		let ins = Instance { position: cgmath::Vector3 {x: 0.0, y: 5.0, z: 0.0}, rotation: cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0)) };
         res.instance_manager.set_from_slice(model_handle, &instances, &mut res.queue);
-        let _instance_handle = res.instance_manager.add_instance(&res.queue, model_handle, &instances[0]);
-        // let _instance_handle = res.instance_manager.add_instance(&res.queue, model_handle, &instances[1]);
+        let _instance_handle = res.instance_manager.add_instance(&res.queue, model_handle, &ins);
+		let ins = Instance { position: cgmath::Vector3 {x: 0.0, y: 10.0, z: 0.0}, rotation: cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0)) };
+        let _instance_handle = res.instance_manager.add_instance(&res.queue, model_handle, &ins);
         // let _instance_handle = res.instance_manager.add_instance(&res.queue, model_handle, &instances[2]);
         // let _instance_handle = res.instance_manager.add_instance(&res.queue, model_handle, &instances[3]);
         // let _instance_handle = res.instance_manager.add_instance(&res.queue, model_handle, &instances[4]);
@@ -488,7 +490,7 @@ impl Renderer for WgpuRenderer<'_> {
                     render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                     render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     render_pass.set_bind_group(0, &material.bind_group, &[]);
-                    render_pass.draw_indexed(0..mesh.num_elements, 0, 0..instance_group.len() as u32);  // TODO: Re implement instancing
+                    render_pass.draw_indexed(0..mesh.num_elements, 0, 0..instance_group.len() as u32);  // TODO: Reimplement instancing
                 }
             }
         }

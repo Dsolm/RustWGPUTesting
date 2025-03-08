@@ -189,7 +189,7 @@ impl InstanceManager {
             )
             .expect("Could not access instance buffer.");
 
-        buffer_view.copy_from_slice(bytemuck::cast_slice(&instance_group.instance_data));
+        buffer_view.copy_from_slice(bytemuck::cast_slice(&instance_group.instance_data[0..instances.len()]));
     }
 
     pub fn clear_instances(&mut self, model: ModelHandle) {
@@ -226,7 +226,7 @@ impl InstanceManager {
             panic!("Instance buffer is full.");
         }
 
-        let instance_index = instance_group.num_instances as u16;
+        let instance_index = instance_group.num_instances;
 
         {
             let instance_data = instance.to_raw();
