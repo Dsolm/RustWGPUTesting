@@ -2,21 +2,6 @@ use std::num::{NonZero, NonZeroU64};
 
 use crate::renderer::ModelHandle;
 
-pub struct Instance {
-    pub position: cgmath::Vector3<f32>,
-    pub rotation: cgmath::Quaternion<f32>,
-}
-
-// impl InstanceGroup {
-//     fn update_buffer() {
-//         self.queue.write_buffer(
-//             &self.camera_buffer,
-//             0,
-//             bytemuck::cast_slice(&[self.camera_uniform]),
-//         );
-//     }
-// }
-
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct InstanceRaw {
@@ -91,14 +76,14 @@ impl InstanceRaw {
     }
 }
 
-struct InstanceHandle(ModelHandle, u16);
 
-struct InstanceManager {
+pub struct InstanceManager {
     // ModelHandle -> InstanceGroup
-    instance_groups: Vec<InstanceGroup>,
+    pub instance_groups: Vec<InstanceGroup>, // Each element corresponds with a ModelID
 }
 
-struct InstanceGroup {
+pub struct InstanceGroup {
+    model: u16, // TODO: Remove
     buffer: wgpu::Buffer,
     instance_indices: Box<[u16]>,      // Sparse set
     instance_data: Box<[InstanceRaw]>, // Sparse set
@@ -135,12 +120,13 @@ impl InstanceGroup {
         &self.buffer
     }
 
-    pub fn make_empty(device: &mut wgpu::Device, max_instances: u16) -> InstanceGroup {
+    // model is a parameter for debug purposes
+    pub fn new_empty(model: u16, device: &mut wgpu::Device, max_instances: u16) -> InstanceGroup {
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("instance buffer"), // TODO: Add model name to label
             size: (size_of::<InstanceRaw>() * max_instances as usize) as u64, // TODO: Add model name to label
-            usage: wgpu::BufferUsages::VERTEX,
-            mapped_at_creation: false,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false, // TODO: Consider this
         });
         let instance_indices = vec![u16::MAX; max_instances as usize];
         let mut instance_data: Vec<InstanceRaw> = Vec::with_capacity(max_instances as usize);
@@ -153,6 +139,7 @@ impl InstanceGroup {
         debug_assert_eq!(instance_data.len(), max_instances as usize);
 
         Self {
+            model,
             buffer,
             instance_indices,
             instance_data,
@@ -165,13 +152,24 @@ impl InstanceGroup {
 
 impl InstanceManager {
     // Handles for instances created this way are like (model, 0..N).
-    fn set_from_slice(
+    pub fn new() -> InstanceManager {
+        Self {
+            instance_groups: vec![],
+        }
+    }
+
+    pub fn add_instance_group(&mut self, device: &mut wgpu::Device, model: u16, max_instances: u16) {
+        self.instance_groups.push(InstanceGroup::new_empty(model, device, max_instances));
+    }
+
+    pub fn set_from_slice(
         &mut self,
         model: ModelHandle,
         instances: &[Instance],
         queue: &mut wgpu::Queue,
     ) {
         let instance_group = &mut self.instance_groups[model.0 as usize];
+        debug_assert_eq!(model.0, instance_group.model);
         assert!(instances.len() <= instance_group.max_instances as usize);
         instance_group.free_list.clear();
         instance_group.num_instances = instances.len() as u16;
@@ -194,10 +192,24 @@ impl InstanceManager {
         buffer_view.copy_from_slice(bytemuck::cast_slice(&instance_group.instance_data));
     }
 
+    pub fn clear_instances(&mut self, model: ModelHandle) {
+        todo!()
+    }
+
+    pub fn add_from_slice(
+        &mut self,
+        model: ModelHandle,
+        instances: &[Instance],
+        queue: &mut wgpu::Queue,
+    ) {
+        // TODO We need to fill all the slots in the free list first and then fill the rest normally.
+        todo!()
+    }
+
     const INSTANCE_SIZE: u64 = size_of::<InstanceRaw>() as u64;
     const INSTANCE_SIZE_NZ: NonZeroU64 = unsafe { NonZeroU64::new_unchecked(Self::INSTANCE_SIZE) };
 
-    fn add_instance(
+    pub fn add_instance(
         &mut self,
         queue: &wgpu::Queue,
         model: ModelHandle,
@@ -207,6 +219,7 @@ impl InstanceManager {
 
         // let mut instance_group = self.instance_groups.entry(model.0).or_insert(InstanceGroup::make_empty(device, MAX_INSTANCES));
         let instance_group = &mut self.instance_groups[model.0 as usize];
+        debug_assert_eq!(model.0, instance_group.model);
 
         // assert_ne!(instance_group.max_instances, instance_group.num_instances);
         if instance_group.max_instances == instance_group.num_instances {
@@ -240,13 +253,14 @@ impl InstanceManager {
     }
 
     // Returns an instance id.
-    fn update_instance(
+    pub fn update_instance(
         &mut self,
         queue: &wgpu::Queue,
         instance_handle: InstanceHandle,
         new_instance: &Instance,
     ) {
         let instance_group = &mut self.instance_groups[instance_handle.0 .0 as usize];
+        debug_assert_eq!(instance_handle.0.0, instance_group.model);
         let instance_index = instance_group.instance_indices[instance_handle.1 as usize];
 
         {
@@ -263,8 +277,9 @@ impl InstanceManager {
         }
     }
 
-    fn delete_instance(&mut self, queue: &wgpu::Queue, instance_handle: InstanceHandle) {
+    pub fn delete_instance(&mut self, queue: &wgpu::Queue, instance_handle: InstanceHandle) {
         let instance_group = &mut self.instance_groups[instance_handle.0 .0 as usize];
+        debug_assert_eq!(instance_handle.0.0, instance_group.model);
         debug_assert!(instance_group.num_instances != 0); // TODO: Unreachable
         let instance_index = instance_group.instance_indices[instance_handle.1 as usize];
 

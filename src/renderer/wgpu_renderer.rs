@@ -2,12 +2,16 @@ use std::{future::Future, pin::Pin, time::Duration};
 use crate::renderer::wgpu_renderer::resources::load_wgpu_model;
 
 
+use instanced_rendering::{Instance, InstanceManager};
+use model::WgpuModel;
 use wgpu::util::DeviceExt;
 use winit::{
     event::{ElementState, KeyEvent, MouseButton, WindowEvent},
     keyboard::PhysicalKey,
     window::Window,
 };
+
+use cgmath::prelude::*;
 
 mod model;
 mod texture;
@@ -58,6 +62,8 @@ struct WgpuRenderer<'a> {
     texture_bind_group_layout: wgpu::BindGroupLayout,
 
     // instance_groups: Vec<InstanceGroup>,
+    instance_manager: InstanceManager,
+    loaded_models: Vec<WgpuModel>,
 }
 
 
@@ -282,7 +288,7 @@ impl<'a> WgpuRenderer<'a> {
             )
         };
 
-        Self {
+        let mut res = Self {
             surface,
             device,
             queue,
@@ -309,7 +315,45 @@ impl<'a> WgpuRenderer<'a> {
             // instance_groups: vec![instance_group],
 
             texture_bind_group_layout,
-        }
+            instance_manager: InstanceManager::new(),
+
+            loaded_models: vec![],
+        };
+        let model_handle = res.load_model("cube.obj", 100).await.unwrap();
+        const NUM_INSTANCES_PER_ROW: u32 = 10;
+        const SPACE_BETWEEN: f32 = 3.0;
+        let instances = (0..NUM_INSTANCES_PER_ROW)
+            .flat_map(|z| {
+                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
+                    let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+                    let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+
+                    let position = cgmath::Vector3 { x, y: 0.0, z };
+
+                    let rotation = if position.is_zero() {
+                        cgmath::Quaternion::from_axis_angle(
+                            cgmath::Vector3::unit_z(),
+                            cgmath::Deg(0.0),
+                        )
+                    } else {
+                        cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
+                    };
+
+                    Instance { position, rotation }
+                })
+            })
+            .collect::<Vec<_>>();
+
+        res.instance_manager.set_from_slice(model_handle, &instances, &mut res.queue);
+        let _instance_handle = res.instance_manager.add_instance(&res.queue, model_handle, &instances[0]);
+        // let _instance_handle = res.instance_manager.add_instance(&res.queue, model_handle, &instances[1]);
+        // let _instance_handle = res.instance_manager.add_instance(&res.queue, model_handle, &instances[2]);
+        // let _instance_handle = res.instance_manager.add_instance(&res.queue, model_handle, &instances[3]);
+        // let _instance_handle = res.instance_manager.add_instance(&res.queue, model_handle, &instances[4]);
+        // let _instance_handle = res.instance_manager.add_instance(&res.queue, model_handle, &instances[5]);
+        // let _instance_handle = res.instance_manager.add_instance(&res.queue, model_handle, &instances[6]);
+
+        res
     }
 }
 
@@ -378,6 +422,7 @@ impl Renderer for WgpuRenderer<'_> {
             0,
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
+
     }
 
     fn render(&mut self) -> Result<(), RenderError> {
@@ -434,15 +479,16 @@ impl Renderer for WgpuRenderer<'_> {
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
             render_pass.set_bind_group(2, &self.light_bind_group, &[]);
-            for instance_group in &self.instance_manager.instance_groups {
-                render_pass.set_vertex_buffer(1, instance_group.instance_buffer.slice(..));
+            for (i, instance_group) in self.instance_manager.instance_groups.iter().enumerate() {
+                render_pass.set_vertex_buffer(1, instance_group.buffer().slice(..));
                 // let model = &self.loaded_models[instance_group.model_handle.0];
-                for mesh in &instance_group.model.meshes { 
-                    let material = &instance_group.model.materials[mesh.material]; // TODO: Cache material bind-groups between draw-calls?
+                let model = &self.loaded_models[i];
+                for mesh in &model.meshes { 
+                    let material = &model.materials[mesh.material]; // TODO: Cache material bind-groups between draw-calls?
                     render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                     render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     render_pass.set_bind_group(0, &material.bind_group, &[]);
-                    render_pass.draw_indexed(0..mesh.num_elements, 0, 0..instance_group.instances.len() as u32);  // TODO: Re implement instancing
+                    render_pass.draw_indexed(0..mesh.num_elements, 0, 0..instance_group.len() as u32);  // TODO: Re implement instancing
                 }
             }
         }
@@ -457,20 +503,25 @@ impl Renderer for WgpuRenderer<'_> {
         self.mouse_pressed
     }
 
-    fn load_model<'a>(&'a mut self, file_path: &'a str) -> Pin<Box<dyn Future<Output = anyhow::Result<ModelHandle>> + Send + '_>> {
+    fn load_model<'a>(&'a mut self, file_path: &'a str, max_instances: u16) -> Pin<Box<dyn Future<Output = anyhow::Result<ModelHandle>> + Send + '_>> {
         Box::pin(
-            async {
+            async move {
 
                 let model = load_wgpu_model(file_path, &self.device, &self.queue, &self.texture_bind_group_layout).await?;
-
-                todo!();
-                // Ok(ModelHandle((self.loaded_models.len() - 1) as u16))
+                let model_handle = ModelHandle(self.loaded_models.len() as u16);
+                self.loaded_models.push(model);
+                self.instance_manager.add_instance_group(&mut self.device, model_handle.0, max_instances);
+                Ok(model_handle)
             }
         )
     }
 
     fn camera_controller(&mut self) -> &mut CameraController {
         &mut self.camera_controller
+    }
+
+    fn add_instance(&mut self, model: ModelHandle, instance: &Instance) {
+        self.instance_manager.add_instance(&self.queue ,model, instance);
     }
 }
 
