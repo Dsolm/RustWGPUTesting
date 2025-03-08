@@ -26,7 +26,7 @@ pub trait Renderer {
     fn render(&mut self) -> Result<(), RenderError>;
 
     // Will allocate space for upto max_instances upfront.
-    fn load_model<'a>(&'a mut self, file_path: &'a str, max_instances: u16) -> Pin<Box<dyn Future<Output = anyhow::Result<ModelHandle>> + Send + '_>>;
+    fn load_model<'a>(&'a mut self, file_path: &'a str, max_instances: u16) -> Pin<Box<dyn Future<Output = anyhow::Result<ModelHandle>> + Send + 'a>>;
 
     fn add_instance(&mut self, model: ModelHandle, instance: &Instance) -> InstanceHandle; 
     fn update_instance(&mut self, model: InstanceHandle, instance: &Instance);  // TODO: Make a drop() for InstanceHandle instead instead.

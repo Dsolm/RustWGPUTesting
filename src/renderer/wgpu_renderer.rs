@@ -1,8 +1,8 @@
 use std::{future::Future, pin::Pin, time::Duration};
-use crate::renderer::wgpu_renderer::resources::load_wgpu_model;
+use crate::renderer::{wgpu_renderer::resources::load_wgpu_model, Instance};
 
 
-use instanced_rendering::{Instance, InstanceManager};
+use instanced_rendering::InstanceManager;
 use model::WgpuModel;
 use wgpu::util::DeviceExt;
 use winit::{
@@ -67,7 +67,7 @@ struct WgpuRenderer<'a> {
 }
 
 
-use super::{ModelHandle, RenderError, Renderer};
+use super::{InstanceHandle, ModelHandle, RenderError, Renderer};
 
 impl<'a> WgpuRenderer<'a> {
     // Creating some of the wgpu types requires async code
@@ -503,7 +503,7 @@ impl Renderer for WgpuRenderer<'_> {
         self.mouse_pressed
     }
 
-    fn load_model<'a>(&'a mut self, file_path: &'a str, max_instances: u16) -> Pin<Box<dyn Future<Output = anyhow::Result<ModelHandle>> + Send + '_>> {
+    fn load_model<'a>(&'a mut self, file_path: &'a str, max_instances: u16) -> Pin<Box<dyn Future<Output = anyhow::Result<ModelHandle>> + Send + 'a>> {
         Box::pin(
             async move {
 
@@ -520,8 +520,16 @@ impl Renderer for WgpuRenderer<'_> {
         &mut self.camera_controller
     }
 
-    fn add_instance(&mut self, model: ModelHandle, instance: &Instance) {
-        self.instance_manager.add_instance(&self.queue ,model, instance);
+    fn add_instance(&mut self, model: ModelHandle, instance: &Instance) -> InstanceHandle {
+        self.instance_manager.add_instance(&self.queue ,model, instance)
+    }
+
+    fn update_instance(&mut self, model: InstanceHandle, instance: &Instance) {
+        todo!()
+    }
+
+    fn remove_instance(&mut self, model: InstanceHandle) {
+        todo!()
     }
 }
 

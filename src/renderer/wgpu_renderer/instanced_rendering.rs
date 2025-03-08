@@ -1,6 +1,6 @@
 use std::num::{NonZero, NonZeroU64};
 
-use crate::renderer::ModelHandle;
+use crate::renderer::{Instance, InstanceHandle, ModelHandle};
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
