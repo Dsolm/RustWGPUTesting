@@ -1,7 +1,13 @@
+mod wgpu_renderer;
+mod camera;
+
+// TODO: It should be the other way arround, we pass in a camera controller, the
+// controller should not live inside the renderer module.
+use camera::camera_controller::CameraController; 
+
 use std::{future::Future, pin::Pin, time::Duration};
 
 use winit::event::WindowEvent;
-use crate::camera::camera_controller::CameraController;
 
 pub enum RenderError {
     Timeout,
@@ -14,8 +20,9 @@ pub struct Instance {
 }
 
 #[derive(Copy, Clone)]
-pub struct ModelHandle(u16); 
+pub struct ModelHandle(u16);
 
+#[allow(dead_code)]
 pub struct InstanceHandle(ModelHandle, u16);
 
 #[allow(dead_code)]
@@ -36,5 +43,4 @@ pub trait Renderer {
     fn camera_controller(&mut self) -> &mut CameraController; //TODO: Remove
 }
 
-mod wgpu_renderer;
 pub use wgpu_renderer::create_wgpu_renderer_winit;

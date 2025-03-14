@@ -1,6 +1,3 @@
-mod camera;
-mod renderer;
-
 use std::time::Instant;
 
 use pasts::Executor;
@@ -65,7 +62,9 @@ async fn run() {
                                     }
                                 }
                             }
-                            _ => {}
+                            _ => {
+                                control_flow.exit();
+                            }
                         }
                     }
                 }
@@ -77,7 +76,7 @@ async fn run() {
                 }
                 _ => {}
             })
-            .expect("WHAAAAAAAAAAAAAAAAAAT");
+            .expect("WHAAAAAAAAAAAAT");
     }
 }
 

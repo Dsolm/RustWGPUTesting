@@ -1,6 +1,8 @@
 use std::{future::Future, pin::Pin, time::Duration};
-use crate::renderer::{wgpu_renderer::resources::load_wgpu_model, Instance};
 
+use resources::load_wgpu_model;
+
+use crate::Instance;
 
 use instanced_rendering::InstanceManager;
 use model::WgpuModel;
@@ -319,7 +321,7 @@ impl<'a> WgpuRenderer<'a> {
 
             loaded_models: vec![],
         };
-        let model_handle = res.load_model("cube.obj", 102).await.unwrap();
+        let model_handle = res.load_model("backpack.obj", 102).await.unwrap();
         const NUM_INSTANCES_PER_ROW: u32 = 10;
         const SPACE_BETWEEN: f32 = 3.0;
         let instances = (0..NUM_INSTANCES_PER_ROW)
@@ -360,6 +362,13 @@ impl<'a> WgpuRenderer<'a> {
 }
 
 impl Renderer for WgpuRenderer<'_> {
+    fn camera_controller(&mut self) -> &mut CameraController {
+        &mut self.camera_controller
+    }
+    fn mouse_pressed(&self) -> bool {
+        self.mouse_pressed
+    }
+
     fn resize(&mut self, width: u32, height: u32) {
         if width > 0 && height > 0 {
             self.projection.resize(width, height);
@@ -501,10 +510,6 @@ impl Renderer for WgpuRenderer<'_> {
         Ok(())
     }
 
-    fn mouse_pressed(&self) -> bool {
-        self.mouse_pressed
-    }
-
     fn load_model<'a>(&'a mut self, file_path: &'a str, max_instances: u16) -> Pin<Box<dyn Future<Output = anyhow::Result<ModelHandle>> + Send + 'a>> {
         Box::pin(
             async move {
@@ -518,19 +523,18 @@ impl Renderer for WgpuRenderer<'_> {
         )
     }
 
-    fn camera_controller(&mut self) -> &mut CameraController {
-        &mut self.camera_controller
-    }
-
     fn add_instance(&mut self, model: ModelHandle, instance: &Instance) -> InstanceHandle {
         self.instance_manager.add_instance(&self.queue ,model, instance)
     }
 
     fn update_instance(&mut self, model: InstanceHandle, instance: &Instance) {
+        let _ = instance;
+        let _ = model;
         todo!()
     }
 
     fn remove_instance(&mut self, model: InstanceHandle) {
+        let _ = model;
         todo!()
     }
 }

@@ -1,6 +1,6 @@
 use std::num::{NonZero, NonZeroU64};
 
-use crate::renderer::{Instance, InstanceHandle, ModelHandle};
+use crate::{Instance, InstanceHandle, ModelHandle};
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -93,29 +93,11 @@ pub struct InstanceGroup {
 }
 
 impl InstanceGroup {
-    // fn make_from_slice(device: &mut wgpu::Device, instance_data: &[Instance], max_instances: u16) -> InstanceGroup {
-    //     let instance_data = instance_data.iter().map(Instance::to_raw).collect::<Vec<_>>();
-    //     let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-    //         label: Some("Instance Buffer"),
-    //         contents: bytemuck::cast_slice(&instance_data),
-    //         usage: wgpu::BufferUsages::VERTEX,
-    //     });
-
-    //     let num_instances: u16 = instance_data.len() as u16;
-
-    //     Self {
-    //         buffer,
-    //         instance_indices: (0..instance_data.len() as u16).collect(),
-    //         instance_data,
-    //         num_instances,
-    //         max_instances,
-    //         free_list: vec![],
-    //     }
-    // }
-
+    // TODO: Remove
     pub fn len(&self) -> u64 {
         self.num_instances as u64
     }
+    // TODO: Remove
     pub fn buffer(&self) -> &wgpu::Buffer {
         &self.buffer
     }
@@ -177,8 +159,10 @@ impl InstanceManager {
         for (i, item) in instances.iter().map(Instance::to_raw).enumerate() {
             instance_group.instance_data[i] = item;
         }
-        for i in 0..instances.len() as u16 {
-            instance_group.instance_indices[i as usize] = i;
+        
+        assert!(instances.len() < u16::MAX.into());
+        for i in 0..instances.len() {
+            instance_group.instance_indices[i] = i as u16;
         }
 
         let mut buffer_view = queue
@@ -193,7 +177,15 @@ impl InstanceManager {
     }
 
     pub fn clear_instances(&mut self, model: ModelHandle) {
-        todo!()
+        let instance_group = &mut self.instance_groups[model.0 as usize];
+        debug_assert_eq!(model.0, instance_group.model);
+        let n_instances = instance_group.num_instances as usize;
+        instance_group.free_list.extend(&instance_group.instance_indices[0..n_instances]);
+        // TODO: if compiling on debug mode
+        for i in instance_group.instance_indices.iter_mut() {
+            *i = u16::MAX;
+        }
+        instance_group.num_instances = 0;
     }
 
     pub fn add_from_slice(
@@ -202,7 +194,29 @@ impl InstanceManager {
         instances: &[Instance],
         queue: &mut wgpu::Queue,
     ) {
-        // TODO We need to fill all the slots in the free list first and then fill the rest normally.
+        let instance_group = &mut self.instance_groups[model.0 as usize];
+        debug_assert_eq!(model.0, instance_group.model);
+        let mut i = 0;
+        while let Some(instance_id) = instance_group.free_list.pop() {
+            instance_group.instance_indices[instance_id as usize] = instance_group.num_instances;
+            {
+                let instance_data = instances[i].to_raw();
+                let mut buffer_view = queue
+                    .write_buffer_with(
+                        &instance_group.buffer,
+                        instance_group.num_instances as u64 * Self::INSTANCE_SIZE,
+                        Self::INSTANCE_SIZE_NZ,
+                    )
+                    .expect("Could not access instance buffer.");
+                buffer_view.copy_from_slice(bytemuck::bytes_of(&instance_data));
+                instance_group.instance_data[instance_group.num_instances as usize] = instance_data;
+            }
+            
+            instance_group.num_instances += 1;
+            i += 1;
+        }
+
+        
         todo!()
     }
 
@@ -215,8 +229,6 @@ impl InstanceManager {
         model: ModelHandle,
         instance: &Instance,
     ) -> InstanceHandle {
-        const MAX_INSTANCES: u16 = 100;
-
         // let mut instance_group = self.instance_groups.entry(model.0).or_insert(InstanceGroup::make_empty(device, MAX_INSTANCES));
         let instance_group = &mut self.instance_groups[model.0 as usize];
         debug_assert_eq!(model.0, instance_group.model);
