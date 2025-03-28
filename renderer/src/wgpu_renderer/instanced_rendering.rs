@@ -216,7 +216,25 @@ impl InstanceManager {
             i += 1;
         }
 
-        
+        // for instance in &instances[i..] {
+        //     instance_group.instance_indices[instance_group.num_instances] = instance_group.num_instances;
+        //     instance_group
+        //     {
+        //         let instance_data = instances[i].to_raw();
+        //         let mut buffer_view = queue
+        //             .write_buffer_with(
+        //                 &instance_group.buffer,
+        //                 instance_group.num_instances as u64 * Self::INSTANCE_SIZE,
+        //                 Self::INSTANCE_SIZE_NZ,
+        //             )
+        //             .expect("Could not access instance buffer.");
+        //         buffer_view.copy_from_slice(bytemuck::bytes_of(&instance_data));
+        //         instance_group.instance_data[instance_group.num_instances as usize] = instance_data;
+        //     }
+            
+        //     instance_group.num_instances += 1;
+        //     i += 1;
+        // }
         todo!()
     }
 

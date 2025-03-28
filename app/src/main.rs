@@ -62,9 +62,7 @@ async fn run() {
                                     }
                                 }
                             }
-                            _ => {
-                                control_flow.exit();
-                            }
+                            _ => {}
                         }
                     }
                 }
